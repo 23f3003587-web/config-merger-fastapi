@@ -71,21 +71,24 @@ class ConfigResponse(BaseModel):
 async def get_effective_config(set: list[str] = Query(default=[])):
     final_config = config.copy()
 
-    # Apply CLI overrides (?set=key=value)
+    # Apply CLI overrides (?set=key=value) - HIGHEST precedence
     for item in set:
         if "=" in item:
-            key, value = item.split("=", 1)
-            key = key.strip().lower()
+            key, value = [x.strip() for x in item.split("=", 1)]
+            key = key.lower()
             
-            if key in ("port", "workers"):
+            if key == "port" or key == "workers":
                 final_config[key] = int(value)
             elif key == "debug":
-                final_config[key] = value.lower() in ("true", "1", "yes", "on")
+                final_config[key] = str(value).lower() in ("true", "1", "yes", "on", "t")
             else:
                 final_config[key] = value
 
     # Mask api_key
     masked_config = final_config.copy()
-    masked_config["api_key"] = "****"
+    if "api_key" in masked_config:
+        masked_config["api_key"] = "****"
+
+    return masked_config
 
     return masked_config
