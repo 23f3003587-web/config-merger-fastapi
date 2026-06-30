@@ -3,11 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import os
 import yaml
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 app = FastAPI(title="Effective Config")
 
-# CORS - required by grader
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -17,7 +16,7 @@ app.add_middleware(
 )
 
 # Layer 1: Defaults
-config = {
+config: Dict[str, Any] = {
     "port": 8000,
     "workers": 1,
     "debug": False,
@@ -33,30 +32,31 @@ try:
 except FileNotFoundError:
     pass
 
-# Layer 3: .env file + NUM_WORKERS alias
-env_file = {}
+# Layer 3: .env + NUM_WORKERS alias
 try:
     with open(".env", "r") as f:
         for line in f:
-            if line.strip() and not line.startswith("#"):
-                key, value = line.strip().split("=", 1)
-                env_file[key.strip()] = value.strip()
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, value = [x.strip() for x in line.split("=", 1)]
+                if key == "NUM_WORKERS":
+                    config["workers"] = int(value)
+                elif key == "APP_API_KEY":
+                    config["api_key"] = value
 except FileNotFoundError:
     pass
-
-if "NUM_WORKERS" in env_file:
-    config["workers"] = int(env_file["NUM_WORKERS"])
-if "APP_API_KEY" in env_file:
-    config["api_key"] = env_file["APP_API_KEY"]
 
 # Layer 4: OS Environment Variables (APP_* prefix)
 for key, value in os.environ.items():
     if key.startswith("APP_"):
         config_key = key[4:].lower()
         if config_key == "debug":
-            config["debug"] = value.lower() in ("true", "1", "yes", "on")
+            config["debug"] = value.lower() in ("true", "1", "yes", "on", "t")
         elif config_key in ("port", "workers"):
-            config[config_key] = int(value)
+            try:
+                config[config_key] = int(value)
+            except ValueError:
+                pass
         else:
             config[config_key] = value
 
@@ -68,27 +68,27 @@ class ConfigResponse(BaseModel):
     api_key: str
 
 @app.get("/effective-config", response_model=ConfigResponse)
-async def get_effective_config(set: list[str] = Query(default=[])):
+async def get_effective_config(set: List[str] = Query(default=[])):
     final_config = config.copy()
-
-    # Apply CLI overrides (?set=key=value) - HIGHEST precedence
+    
+    # HIGHEST precedence: CLI overrides ?set=key=value
     for item in set:
         if "=" in item:
             key, value = [x.strip() for x in item.split("=", 1)]
             key = key.lower()
             
-            if key == "port" or key == "workers":
-                final_config[key] = int(value)
+            if key in ("port", "workers"):
+                try:
+                    final_config[key] = int(value)
+                except ValueError:
+                    pass
             elif key == "debug":
-                final_config[key] = str(value).lower() in ("true", "1", "yes", "on", "t")
+                final_config[key] = str(value).lower() in ("true", "1", "yes", "on", "t", "true")
             else:
                 final_config[key] = value
 
     # Mask api_key
     masked_config = final_config.copy()
-    if "api_key" in masked_config:
-        masked_config["api_key"] = "****"
-
-    return masked_config
-
+    masked_config["api_key"] = "****"
+    
     return masked_config
